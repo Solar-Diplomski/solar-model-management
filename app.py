@@ -121,8 +121,7 @@ async def upload_model(
     db_pool=Depends(get_db_pool),
 ):
     ext = await _validate_file_extension(file.filename)
-    pool = db_pool
-    async with pool.acquire() as conn:
+    async with db_pool.acquire() as conn:
         async with conn.transaction():
             await _check_plant_exists(conn, plant_id)
             await _check_duplicate_model(conn, model_name, version)
