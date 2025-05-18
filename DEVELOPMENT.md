@@ -9,4 +9,4 @@ Install dependencies if you don't have them:
 ```pip install -r requirements.txt```
 
 Run the application using Uvicorn:
-```uvicorn main:app --reload```
+```uvicorn app:app --reload```
