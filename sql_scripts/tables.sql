@@ -10,7 +10,8 @@ CREATE TABLE model_metadata (
     version INTEGER NOT NULL,
     path VARCHAR(1024) NOT NULL,
     features JSONB NOT NULL,
-    creation_date TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP
+    creation_date TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    plant_id INTEGER NOT NULL REFERENCES power_plant_v2(id)
 );
 
 ALTER TABLE model_metadata

@@ -10,4 +10,5 @@ class AppConfig(BaseSettings):
     postgres_password: str = "postgres"
 
     class Config:
-        env_file = ".env.dev"
+        env_file = ".env"
+        env_prefix = "SOLAR_"
