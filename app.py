@@ -109,7 +109,7 @@ async def _insert_model_metadata(
     )
 
 
-@app.post("/models/")
+@app.post("/models")
 async def upload_model(
     file: UploadFile = File(...),
     plant_id: int = Form(...),
