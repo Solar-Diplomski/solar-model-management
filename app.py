@@ -79,6 +79,16 @@ class ModelsListResponse(BaseModel):
     total_pages: int
 
 
+class ModelUpdateRequest(BaseModel):
+    features: List[str]
+    is_active: bool
+
+
+class UpdateSuccessResponse(BaseModel):
+    message: str
+    model_id: int
+
+
 async def _validate_file_extension(filename: str) -> str:
     """Validate that the uploaded file has an allowed extension."""
     ext = Path(filename).suffix
@@ -275,6 +285,63 @@ async def get_model(model_id: int):
         except Exception as e:
             logger.error(f"Database query failed: {str(e)}")
             raise HTTPException(status_code=500, detail="Failed to fetch model")
+
+
+@app.put("/models/{model_id}", response_model=UpdateSuccessResponse)
+async def update_model_features(model_id: int, update_data: ModelUpdateRequest):
+    """
+    Update the features and is_active status of a specific model by ID.
+    Both the features and is_active fields can be modified.
+    """
+    async with db_pool.acquire() as conn:
+        try:
+            check_query = """
+                SELECT 
+                    mm.id,
+                    mm.name,
+                    mm.type,
+                    mm.version,
+                    mm.features,
+                    mm.is_active,
+                    mm.file_type,
+                    pp.name as plant_name
+                FROM model_metadata mm
+                JOIN power_plant_v2 pp ON mm.plant_id = pp.id
+                WHERE mm.id = $1
+            """
+
+            existing_model = await conn.fetchrow(check_query, model_id)
+
+            if not existing_model:
+                raise HTTPException(
+                    status_code=404, detail=f"Model with ID {model_id} not found"
+                )
+
+            update_query = """
+                UPDATE model_metadata 
+                SET features = $1, is_active = $2
+                WHERE id = $3
+            """
+
+            await conn.execute(
+                update_query,
+                json.dumps(update_data.features),
+                update_data.is_active,
+                model_id,
+            )
+
+            return UpdateSuccessResponse(
+                message="Model features and status updated successfully",
+                model_id=model_id,
+            )
+
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Database update failed: {str(e)}")
+            raise HTTPException(
+                status_code=500, detail="Failed to update model features"
+            )
 
 
 @app.post("/models", response_model=UploadSuccessResponse)
