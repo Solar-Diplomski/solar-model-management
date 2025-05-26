@@ -1,10 +1,12 @@
-from fastapi import FastAPI, UploadFile, File, Form, HTTPException
-from pydantic import BaseModel
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Query
+from pydantic import BaseModel, field_validator
+from typing import List, Any
 import asyncpg
 from pathlib import Path
 import shutil
 import os
 import logging
+import json
 from contextlib import asynccontextmanager
 
 logging.basicConfig(level=logging.INFO)
@@ -46,6 +48,35 @@ app = FastAPI(title="Solar Model Management API", version="1.0.0", lifespan=life
 class UploadSuccessResponse(BaseModel):
     message: str
     model_id: int
+
+
+class ModelResponse(BaseModel):
+    id: int
+    name: str
+    type: str
+    version: int
+    features: Any
+    plant_name: str
+    is_active: bool
+    file_type: str
+
+    @field_validator("features")
+    @classmethod
+    def parse_features(cls, v):
+        if isinstance(v, str):
+            try:
+                return json.loads(v)
+            except json.JSONDecodeError:
+                return v
+        return v
+
+
+class ModelsListResponse(BaseModel):
+    models: List[ModelResponse]
+    total_count: int
+    page: int
+    page_size: int
+    total_pages: int
 
 
 async def _validate_file_extension(filename: str) -> str:
@@ -129,6 +160,121 @@ async def _insert_model_metadata(
 async def root():
     """Root endpoint returning API information."""
     return {"message": "Solar Model Management API"}
+
+
+@app.get("/models", response_model=ModelsListResponse)
+async def list_models(
+    page: int = Query(1, ge=1, description="Page number (1-indexed)"),
+    page_size: int = Query(10, ge=1, le=100, description="Number of items per page"),
+):
+    """
+    Get a paginated list of all models from the model_metadata table.
+    Results are sorted by plant name, then by model name, then by version.
+    """
+    offset = (page - 1) * page_size
+
+    async with db_pool.acquire() as conn:
+        try:
+            # Query to get total count
+            count_query = """
+                SELECT COUNT(*) 
+                FROM model_metadata mm
+                JOIN power_plant_v2 pp ON mm.plant_id = pp.id
+            """
+            total_count = await conn.fetchval(count_query)
+
+            query = """
+                SELECT 
+                    mm.id,
+                    mm.name,
+                    mm.type,
+                    mm.version,
+                    mm.features,
+                    mm.is_active,
+                    mm.file_type,
+                    pp.name as plant_name
+                FROM model_metadata mm
+                JOIN power_plant_v2 pp ON mm.plant_id = pp.id
+                ORDER BY pp.name, mm.name, mm.version
+                LIMIT $1 OFFSET $2
+            """
+
+            rows = await conn.fetch(query, page_size, offset)
+
+            models = [
+                ModelResponse(
+                    id=row["id"],
+                    name=row["name"],
+                    type=row["type"],
+                    version=row["version"],
+                    features=row["features"],
+                    plant_name=row["plant_name"],
+                    is_active=row["is_active"],
+                    file_type=row["file_type"],
+                )
+                for row in rows
+            ]
+
+            total_pages = (total_count + page_size - 1) // page_size
+
+            return ModelsListResponse(
+                models=models,
+                total_count=total_count,
+                page=page,
+                page_size=page_size,
+                total_pages=total_pages,
+            )
+
+        except Exception as e:
+            logger.error(f"Database query failed: {str(e)}")
+            raise HTTPException(status_code=500, detail="Failed to fetch models")
+
+
+@app.get("/models/{model_id}", response_model=ModelResponse)
+async def get_model(model_id: int):
+    """
+    Get a single model by ID from the model_metadata table.
+    """
+    async with db_pool.acquire() as conn:
+        try:
+            query = """
+                SELECT 
+                    mm.id,
+                    mm.name,
+                    mm.type,
+                    mm.version,
+                    mm.features,
+                    mm.is_active,
+                    mm.file_type,
+                    pp.name as plant_name
+                FROM model_metadata mm
+                JOIN power_plant_v2 pp ON mm.plant_id = pp.id
+                WHERE mm.id = $1
+            """
+
+            row = await conn.fetchrow(query, model_id)
+
+            if not row:
+                raise HTTPException(
+                    status_code=404, detail=f"Model with ID {model_id} not found"
+                )
+
+            return ModelResponse(
+                id=row["id"],
+                name=row["name"],
+                type=row["type"],
+                version=row["version"],
+                features=row["features"],
+                plant_name=row["plant_name"],
+                is_active=row["is_active"],
+                file_type=row["file_type"],
+            )
+
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Database query failed: {str(e)}")
+            raise HTTPException(status_code=500, detail="Failed to fetch model")
 
 
 @app.post("/models", response_model=UploadSuccessResponse)
