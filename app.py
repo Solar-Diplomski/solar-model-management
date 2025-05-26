@@ -1,56 +1,55 @@
-from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Depends
-from fastapi.responses import JSONResponse
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException
+from pydantic import BaseModel
 import asyncpg
 from pathlib import Path
 import shutil
-from config import AppConfig
-import asyncio
+import os
+import logging
 from contextlib import asynccontextmanager
 
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+DATABASE_URL = os.getenv(
+    "DATABASE_URL", "postgresql://postgres:postgres@localhost:5432/solar"
+)
+MODEL_STORAGE_PATH = os.getenv("MODEL_STORAGE_PATH", "./models")
+
 ALLOWED_EXTENSIONS = {".joblib", ".pkl", ".sav", ".h5", ".pt", ".onnx"}
+
+db_pool = None
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    global db_pool
+    try:
+        # Initialize connection pool
+        db_pool = await asyncpg.create_pool(
+            DATABASE_URL, min_size=1, max_size=10, command_timeout=60
+        )
+        logger.info("Database connection pool created successfully!")
+    except Exception as e:
+        logger.error(f"Database connection pool creation failed: {str(e)}")
+
     yield
-    db_pool = getattr(app.state, "db_pool", None)
-    if db_pool is not None:
-        try:
-            await db_pool.close()
-        except Exception:
-            pass
+
+    # Cleanup: Close the connection pool
+    if db_pool:
+        await db_pool.close()
+        logger.info("Database connection pool closed")
 
 
-app = FastAPI(lifespan=lifespan)
+app = FastAPI(title="Solar Model Management API", version="1.0.0", lifespan=lifespan)
 
 
-def get_config() -> AppConfig:
-    return AppConfig()
-
-
-def get_db_pool_lock():
-    if not hasattr(app.state, "db_pool_lock"):
-        app.state.db_pool_lock = asyncio.Lock()
-    return app.state.db_pool_lock
-
-
-async def get_db_pool(config: AppConfig = Depends(get_config)):
-    lock = get_db_pool_lock()
-    async with lock:
-        if not hasattr(app.state, "db_pool"):
-            app.state.db_pool = await asyncpg.create_pool(
-                host=config.postgres_host,
-                port=config.postgres_port,
-                database=config.postgres_db,
-                user=config.postgres_user,
-                password=config.postgres_password,
-                min_size=1,
-                max_size=10,
-            )
-    return app.state.db_pool
+class UploadSuccessResponse(BaseModel):
+    message: str
+    model_id: int
 
 
 async def _validate_file_extension(filename: str) -> str:
+    """Validate that the uploaded file has an allowed extension."""
     ext = Path(filename).suffix
     if ext not in ALLOWED_EXTENSIONS:
         raise HTTPException(
@@ -60,6 +59,7 @@ async def _validate_file_extension(filename: str) -> str:
 
 
 async def _check_plant_exists(conn: asyncpg.Connection, plant_id: int) -> None:
+    """Check if the specified plant ID exists in the database."""
     plant = await conn.fetchrow("SELECT id FROM power_plant_v2 WHERE id = $1", plant_id)
     if not plant:
         raise HTTPException(status_code=404, detail="Plant ID does not exist.")
@@ -68,6 +68,7 @@ async def _check_plant_exists(conn: asyncpg.Connection, plant_id: int) -> None:
 async def _check_duplicate_model(
     conn: asyncpg.Connection, model_name: str, version: int
 ) -> None:
+    """Check if a model with the same name and version already exists."""
     duplicate = await conn.fetchrow(
         "SELECT id FROM model_metadata WHERE name = $1 AND version = $2",
         model_name,
@@ -81,12 +82,17 @@ async def _check_duplicate_model(
 
 
 async def _store_model_file(file: UploadFile, model_path: Path) -> None:
+    """Store the uploaded model file to the specified path."""
     if model_path.exists():
         raise HTTPException(status_code=409, detail="Model file already exists.")
+
     model_path.parent.mkdir(parents=True, exist_ok=True)
-    with model_path.open("wb") as buffer:
-        shutil.copyfileobj(file.file, buffer)
-    file.file.close()
+
+    try:
+        with model_path.open("wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+    finally:
+        file.file.close()
 
 
 async def _insert_model_metadata(
@@ -97,19 +103,35 @@ async def _insert_model_metadata(
     model_path: Path,
     features: str,
     plant_id: int,
-) -> None:
-    await conn.execute(
-        "INSERT INTO model_metadata (name, type, version, path, features, plant_id) VALUES ($1, $2, $3, $4, $5, $6)",
+    is_active: bool,
+    file_type: str,
+) -> int:
+    """Insert model metadata into the database and return the model ID."""
+    result = await conn.fetchrow(
+        """
+        INSERT INTO model_metadata (name, type, version, path, features, plant_id, is_active, file_type) 
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8) 
+        RETURNING id
+        """,
         model_name,
         model_type,
         version,
         str(model_path),
         features,
         plant_id,
+        is_active,
+        file_type,
     )
+    return result["id"]
 
 
-@app.post("/models")
+@app.get("/")
+async def root():
+    """Root endpoint returning API information."""
+    return {"message": "Solar Model Management API"}
+
+
+@app.post("/models", response_model=UploadSuccessResponse)
 async def upload_model(
     file: UploadFile = File(...),
     plant_id: int = Form(...),
@@ -117,26 +139,64 @@ async def upload_model(
     version: int = Form(...),
     model_type: str = Form(...),
     features: str = Form(...),
-    config: AppConfig = Depends(get_config),
-    db_pool=Depends(get_db_pool),
+    is_active: bool = Form(...),
 ):
-    ext = await _validate_file_extension(file.filename)
-    async with db_pool.acquire() as conn:
-        async with conn.transaction():
-            await _check_plant_exists(conn, plant_id)
-            await _check_duplicate_model(conn, model_name, version)
-            model_dir = (
-                Path(config.model_storage_path)
-                / str(plant_id)
-                / model_name
-                / f"v{version}"
-            )
-            model_path = model_dir / f"model{ext}"
-            await _store_model_file(file, model_path)
-            await _insert_model_metadata(
-                conn, model_name, model_type, version, model_path, features, plant_id
-            )
-    return JSONResponse(
-        status_code=201,
-        content={"message": "Model uploaded and metadata stored successfully."},
-    )
+    """
+    Upload a new model file and store its metadata.
+
+    The model file will be stored in the file system and its metadata
+    will be saved to the database. The features should be provided as
+    a JSON string. The file_type will be automatically derived from
+    the uploaded file extension.
+    """
+    try:
+        ext = await _validate_file_extension(file.filename)
+        # Derive file_type from extension (remove the leading dot)
+        file_type = ext[1:] if ext.startswith(".") else ext
+
+        async with db_pool.acquire() as conn:
+            async with conn.transaction():
+                await _check_plant_exists(conn, plant_id)
+                await _check_duplicate_model(conn, model_name, version)
+
+                model_dir = (
+                    Path(MODEL_STORAGE_PATH)
+                    / str(plant_id)
+                    / model_name
+                    / f"v{version}"
+                )
+                model_path = model_dir / f"model{ext}"
+
+                await _store_model_file(file, model_path)
+                model_id = await _insert_model_metadata(
+                    conn,
+                    model_name,
+                    model_type,
+                    version,
+                    model_path,
+                    features,
+                    plant_id,
+                    is_active,
+                    file_type,
+                )
+
+                logger.info(
+                    f"Model uploaded successfully: {model_name} v{version} (ID: {model_id})"
+                )
+
+                return UploadSuccessResponse(
+                    message="Model uploaded and metadata stored successfully",
+                    model_id=model_id,
+                )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Model upload failed: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to upload model")
+
+
+if __name__ == "__main__":
+    import uvicorn
+
+    uvicorn.run(app, host="0.0.0.0", port=8000)
