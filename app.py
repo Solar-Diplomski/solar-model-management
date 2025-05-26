@@ -71,6 +71,12 @@ class ModelResponse(BaseModel):
         return v
 
 
+class PowerPlantResponse(BaseModel):
+    id: int
+    longitude: float | None
+    latitude: float | None
+
+
 class ModelsListResponse(BaseModel):
     models: List[ModelResponse]
     total_count: int
@@ -341,6 +347,49 @@ async def update_model_features(model_id: int, update_data: ModelUpdateRequest):
             logger.error(f"Database update failed: {str(e)}")
             raise HTTPException(
                 status_code=500, detail="Failed to update model features"
+            )
+
+
+@app.get(
+    "/internal/power-plant/active",
+    response_model=List[PowerPlantResponse],
+)
+async def get_power_plants_with_active_models():
+    """
+    Internal endpoint that returns all power plants that have at least one active model.
+    Returns the power plant ID, longitude, and latitude for each plant.
+    """
+    async with db_pool.acquire() as conn:
+        try:
+            query = """
+                SELECT DISTINCT
+                    pp.id,
+                    pp.longitude,
+                    pp.latitude
+                FROM power_plant_v2 pp
+                INNER JOIN model_metadata mm ON pp.id = mm.plant_id
+                WHERE mm.is_active = true
+                ORDER BY pp.id
+            """
+
+            rows = await conn.fetch(query)
+
+            power_plants = [
+                PowerPlantResponse(
+                    id=row["id"],
+                    longitude=row["longitude"],
+                    latitude=row["latitude"],
+                )
+                for row in rows
+            ]
+
+            return power_plants
+
+        except Exception as e:
+            logger.error(f"Database query failed: {str(e)}")
+            raise HTTPException(
+                status_code=500,
+                detail="Failed to fetch power plants with active models",
             )
 
 
