@@ -75,6 +75,7 @@ class PowerPlantResponse(BaseModel):
     id: int
     longitude: float | None
     latitude: float | None
+    capacity: float | None
 
 
 class ModelsListResponse(BaseModel):
@@ -365,7 +366,8 @@ async def get_power_plants_with_active_models():
                 SELECT DISTINCT
                     pp.id,
                     pp.longitude,
-                    pp.latitude
+                    pp.latitude,
+                    pp.capacity
                 FROM power_plant_v2 pp
                 INNER JOIN model_metadata mm ON pp.id = mm.plant_id
                 WHERE mm.is_active = true
@@ -379,6 +381,7 @@ async def get_power_plants_with_active_models():
                     id=row["id"],
                     longitude=row["longitude"],
                     latitude=row["latitude"],
+                    capacity=row["capacity"],
                 )
                 for row in rows
             ]
