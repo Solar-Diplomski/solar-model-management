@@ -1,4 +1,5 @@
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Query
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, field_validator
 from typing import List, Any
 import asyncpg
@@ -56,6 +57,28 @@ class ModelResponse(BaseModel):
     type: str
     version: int
     features: Any
+    plant_name: str
+    is_active: bool
+    file_type: str
+
+    @field_validator("features")
+    @classmethod
+    def parse_features(cls, v):
+        if isinstance(v, str):
+            try:
+                return json.loads(v)
+            except json.JSONDecodeError:
+                return v
+        return v
+
+
+class ActiveModelResponse(BaseModel):
+    id: int
+    name: str
+    type: str
+    version: int
+    features: Any
+    plant_id: int
     plant_name: str
     is_active: bool
     file_type: str
@@ -459,6 +482,111 @@ async def upload_model(
     except Exception as e:
         logger.error(f"Model upload failed: {str(e)}")
         raise HTTPException(status_code=500, detail="Failed to upload model")
+
+
+@app.get("/internal/models/active", response_model=List[ActiveModelResponse])
+async def get_active_models():
+    """
+    Get all active models from the model_metadata table.
+    Results are sorted by plant name, then by model name, then by version.
+    """
+    async with db_pool.acquire() as conn:
+        try:
+            query = """
+                SELECT 
+                    mm.id,
+                    mm.name,
+                    mm.type,
+                    mm.version,
+                    mm.features,
+                    mm.is_active,
+                    mm.file_type,
+                    mm.plant_id,
+                    pp.name as plant_name
+                FROM model_metadata mm
+                JOIN power_plant_v2 pp ON mm.plant_id = pp.id
+                WHERE mm.is_active = true
+                ORDER BY pp.name, mm.name, mm.version
+            """
+
+            rows = await conn.fetch(query)
+
+            models = [
+                ActiveModelResponse(
+                    id=row["id"],
+                    name=row["name"],
+                    type=row["type"],
+                    version=row["version"],
+                    features=row["features"],
+                    plant_id=row["plant_id"],
+                    plant_name=row["plant_name"],
+                    is_active=row["is_active"],
+                    file_type=row["file_type"],
+                )
+                for row in rows
+            ]
+
+            return models
+
+        except Exception as e:
+            logger.error(f"Database query failed: {str(e)}")
+            raise HTTPException(status_code=500, detail="Failed to fetch active models")
+
+
+@app.get("/internal/models/{model_id}/download")
+async def download_model(model_id: int):
+    """
+    Download the model file for a specific model ID.
+    Returns the actual model file as a downloadable attachment.
+    """
+    async with db_pool.acquire() as conn:
+        try:
+            query = """
+                SELECT 
+                    mm.id,
+                    mm.name,
+                    mm.version,
+                    mm.path,
+                    mm.file_type,
+                    mm.plant_id,
+                    pp.name as plant_name
+                FROM model_metadata mm
+                JOIN power_plant_v2 pp ON mm.plant_id = pp.id
+                WHERE mm.id = $1
+            """
+
+            row = await conn.fetchrow(query, model_id)
+
+            if not row:
+                raise HTTPException(
+                    status_code=404, detail=f"Model with ID {model_id} not found"
+                )
+
+            model_path = Path(row["path"])
+
+            # Handle relative paths stored in database (like "models\1\rf\v5\model.joblib")
+            if not model_path.is_absolute():
+                model_path = model_path.resolve()
+
+            if not model_path.exists():
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"Model file not found on disk: {model_path}",
+                )
+
+            filename = f"{row['plant_name']}_{row['name']}_v{row['version']}.{row['file_type']}"
+
+            return FileResponse(
+                path=str(model_path),
+                filename=filename,
+                media_type="application/octet-stream",
+            )
+
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Model download failed: {str(e)}")
+            raise HTTPException(status_code=500, detail="Failed to download model")
 
 
 if __name__ == "__main__":
