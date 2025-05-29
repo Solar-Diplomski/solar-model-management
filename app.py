@@ -74,13 +74,8 @@ class ModelResponse(BaseModel):
 
 class ActiveModelResponse(BaseModel):
     id: int
-    name: str
-    type: str
-    version: int
     features: Any
     plant_id: int
-    plant_name: str
-    is_active: bool
     file_type: str
 
     @field_validator("features")
@@ -495,14 +490,9 @@ async def get_active_models():
             query = """
                 SELECT 
                     mm.id,
-                    mm.name,
-                    mm.type,
-                    mm.version,
                     mm.features,
-                    mm.is_active,
                     mm.file_type,
-                    mm.plant_id,
-                    pp.name as plant_name
+                    mm.plant_id
                 FROM model_metadata mm
                 JOIN power_plant_v2 pp ON mm.plant_id = pp.id
                 WHERE mm.is_active = true
@@ -514,13 +504,8 @@ async def get_active_models():
             models = [
                 ActiveModelResponse(
                     id=row["id"],
-                    name=row["name"],
-                    type=row["type"],
-                    version=row["version"],
                     features=row["features"],
                     plant_id=row["plant_id"],
-                    plant_name=row["plant_name"],
-                    is_active=row["is_active"],
                     file_type=row["file_type"],
                 )
                 for row in rows
