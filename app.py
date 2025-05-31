@@ -114,6 +114,45 @@ class UpdateSuccessResponse(BaseModel):
     model_id: int
 
 
+class AvailableFeaturesResponse(BaseModel):
+    features: List[str]
+
+
+available_features = [
+    "temperature_2m",
+    "relative_humidity_2m",
+    "cloud_cover",
+    "cloud_cover_low",
+    "cloud_cover_mid",
+    "wind_speed_10m",
+    "wind_direction_10m",
+    "shortwave_radiation",
+    "shortwave_radiation_instant",
+    "diffuse_radiation",
+    "diffuse_radiation_instant",
+    "direct_normal_irradiance",
+    "et0_fao_evapotranspiration",
+    "vapour_pressure_deficit",
+    "is_day",
+    "sunshine_duration",
+    "hour",
+    "month",
+    "day",
+    "day_of_year",
+    "week_of_year",
+    "day_of_week",
+    "hour_sin",
+    "hour_cos",
+    "month_sin",
+    "month_cos",
+    "capacity",
+    "power_plant_capacity",
+    "latitude",
+    "longitude",
+    "elevation",
+]
+
+
 async def _validate_file_extension(filename: str) -> str:
     """Validate that the uploaded file has an allowed extension."""
     ext = Path(filename).suffix
@@ -122,6 +161,17 @@ async def _validate_file_extension(filename: str) -> str:
             status_code=400, detail=f"File extension {ext} not allowed."
         )
     return ext
+
+
+async def _validate_features(features: List[str]) -> None:
+    """Validate that all provided features are in the available features list."""
+    invalid_features = [f for f in features if f not in available_features]
+    if invalid_features:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid features provided: {invalid_features}. "
+            f"Available features: {available_features}",
+        )
 
 
 async def _check_plant_exists(conn: asyncpg.Connection, plant_id: int) -> None:
@@ -195,6 +245,14 @@ async def _insert_model_metadata(
 async def root():
     """Root endpoint returning API information."""
     return {"message": "Solar Model Management API"}
+
+
+@app.get("/features", response_model=AvailableFeaturesResponse)
+async def get_available_features():
+    """
+    Get all available features that can be used in model training and prediction.
+    """
+    return AvailableFeaturesResponse(features=available_features)
 
 
 @app.get("/models", response_model=ModelsListResponse)
@@ -318,6 +376,9 @@ async def update_model_features(model_id: int, update_data: ModelUpdateRequest):
     Update the features and is_active status of a specific model by ID.
     Both the features and is_active fields can be modified.
     """
+    # Validate features before database operations
+    await _validate_features(update_data.features)
+
     async with db_pool.acquire() as conn:
         try:
             check_query = """
@@ -433,6 +494,18 @@ async def upload_model(
     the uploaded file extension.
     """
     try:
+        # Parse and validate features
+        try:
+            features_list = json.loads(features)
+            if not isinstance(features_list, list):
+                raise HTTPException(
+                    status_code=400, detail="Features must be a JSON array of strings"
+                )
+        except json.JSONDecodeError:
+            raise HTTPException(status_code=400, detail="Features must be valid JSON")
+
+        await _validate_features(features_list)
+
         ext = await _validate_file_extension(file.filename)
         # Derive file_type from extension (remove the leading dot)
         file_type = ext[1:] if ext.startswith(".") else ext
