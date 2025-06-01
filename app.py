@@ -114,6 +114,10 @@ class UpdateSuccessResponse(BaseModel):
     model_id: int
 
 
+class DeleteSuccessResponse(BaseModel):
+    message: str
+
+
 class AvailableFeaturesResponse(BaseModel):
     features: List[str]
 
@@ -239,6 +243,60 @@ async def _insert_model_metadata(
         file_type,
     )
     return result["id"]
+
+
+async def _delete_model_file(model_path: Path) -> None:
+    """Delete the model file from the filesystem."""
+    if not model_path.exists():
+        logger.warning(f"Model file not found for deletion: {model_path}")
+        return
+
+    try:
+        model_path.unlink()
+        logger.info(f"Model file deleted successfully: {model_path}")
+    except Exception as e:
+        logger.error(f"Failed to delete model file {model_path}: {str(e)}")
+        raise HTTPException(status_code=500)
+
+
+async def _cleanup_empty_directories(model_path: Path) -> None:
+    """Clean up empty parent directories after model file deletion."""
+    try:
+        # Start from the model file's parent directory and work up
+        current_dir = model_path.parent
+
+        # Stop at the MODEL_STORAGE_PATH to avoid deleting the root storage directory
+        storage_path = Path(MODEL_STORAGE_PATH).resolve()
+
+        while current_dir != storage_path and current_dir.parent != current_dir:
+            try:
+                current_dir.rmdir()
+                logger.info(f"Removed empty directory: {current_dir}")
+                current_dir = current_dir.parent
+            except OSError:
+                # Directory not empty or cannot be removed, stop cleanup
+                break
+    except Exception as e:
+        logger.warning(
+            f"Failed to cleanup empty directories for {model_path}: {str(e)}"
+        )
+
+
+async def _delete_model_metadata(conn: asyncpg.Connection, model_id: int) -> dict:
+    """Delete model metadata from the database and return the deleted model info."""
+    model_info = await conn.fetchrow(
+        "SELECT name, version, path, plant_id FROM model_metadata WHERE id = $1",
+        model_id,
+    )
+
+    if not model_info:
+        raise HTTPException(
+            status_code=404, detail=f"Model with ID {model_id} not found"
+        )
+
+    await conn.execute("DELETE FROM model_metadata WHERE id = $1", model_id)
+
+    return dict(model_info)
 
 
 @app.get("/")
@@ -428,6 +486,42 @@ async def update_model_features(model_id: int, update_data: ModelUpdateRequest):
             raise HTTPException(
                 status_code=500, detail="Failed to update model features"
             )
+
+
+@app.delete("/models/{model_id}", response_model=DeleteSuccessResponse)
+async def delete_model(model_id: int):
+    """
+    Delete a specific model by ID.
+    Removes both the database record and the model file from the filesystem.
+    If file deletion fails, the database transaction is rolled back.
+    """
+    async with db_pool.acquire() as conn:
+        try:
+            async with conn.transaction():
+                model_info = await _delete_model_metadata(conn, model_id)
+
+                # Convert to Path object, handling both relative and absolute paths
+                model_path = Path(model_info["path"])
+                if not model_path.is_absolute():
+                    model_path = model_path.resolve()
+
+                # Delete the model file - if this fails, transaction will be rolled back
+                await _delete_model_file(model_path)
+
+                await _cleanup_empty_directories(model_path)
+
+                logger.info(
+                    f"Model deleted successfully: {model_info['name']} v{model_info['version']} "
+                    f"(ID: {model_id}, Plant: {model_info['plant_id']})"
+                )
+
+                return DeleteSuccessResponse(message="Model deleted successfully")
+
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Model deletion failed: {str(e)}")
+            raise HTTPException(status_code=500, detail="Failed to delete model")
 
 
 @app.get(
