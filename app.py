@@ -89,6 +89,15 @@ class ActiveModelResponse(BaseModel):
         return v
 
 
+class PowerPlantDetailResponse(BaseModel):
+    id: int
+    name: str
+    latitude: float | None
+    longitude: float | None
+    capacity: float | None
+    model_count: int
+
+
 class PowerPlantResponse(BaseModel):
     id: int
     longitude: float | None
@@ -739,6 +748,50 @@ async def download_model(model_id: int):
         except Exception as e:
             logger.error(f"Model download failed: {str(e)}")
             raise HTTPException(status_code=500, detail="Failed to download model")
+
+
+@app.get("/power_plant/{id}", response_model=PowerPlantDetailResponse)
+async def get_power_plant(id: int):
+    """
+    Get a single power plant by ID with model count.
+    """
+    async with db_pool.acquire() as conn:
+        try:
+            query = """
+                SELECT 
+                    pp.id,
+                    pp.name,
+                    pp.latitude,
+                    pp.longitude,
+                    pp.capacity,
+                    COUNT(mm.id) as model_count
+                FROM power_plant_v2 pp
+                LEFT JOIN model_metadata mm ON pp.id = mm.plant_id
+                WHERE pp.id = $1
+                GROUP BY pp.id, pp.name, pp.latitude, pp.longitude, pp.capacity
+            """
+
+            row = await conn.fetchrow(query, id)
+
+            if not row:
+                raise HTTPException(
+                    status_code=404, detail=f"Power plant with ID {id} not found"
+                )
+
+            return PowerPlantDetailResponse(
+                id=row["id"],
+                name=row["name"],
+                latitude=row["latitude"],
+                longitude=row["longitude"],
+                capacity=row["capacity"],
+                model_count=row["model_count"],
+            )
+
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Database query failed: {str(e)}")
+            raise HTTPException(status_code=500, detail="Failed to fetch power plant")
 
 
 if __name__ == "__main__":
