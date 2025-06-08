@@ -112,3 +112,15 @@ class PowerPlantCreateRequest(BaseModel):
 class PowerPlantCreateResponse(BaseModel):
     message: str
     power_plant_id: int
+
+
+class PowerPlantUpdateRequest(BaseModel):
+    name: str | None = None
+    longitude: float | None = None
+    latitude: float | None = None
+    capacity: float | None = None
+
+
+class PowerPlantUpdateResponse(BaseModel):
+    message: str
+    power_plant_id: int
