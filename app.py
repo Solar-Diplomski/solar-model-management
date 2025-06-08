@@ -482,7 +482,9 @@ async def get_power_plants_overview():
                     model_info = plant_models[plant_id]
                     try:
                         async with httpx.AsyncClient() as client:
-                            forecast_url = f"{PREDICTION_SERVICE_URL}/internal/forecast/{model_info['id']}"
+                            forecast_url = (
+                                f"{PREDICTION_SERVICE_URL}/forecast/{model_info['id']}"
+                            )
                             params = {
                                 "start_date": start_date_str,
                                 "end_date": end_date_str,
