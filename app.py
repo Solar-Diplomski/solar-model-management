@@ -24,6 +24,8 @@ from solar_model_mgmt.models import (
     PowerPlantOverviewResponse,
     PowerPlantCreateRequest,
     PowerPlantCreateResponse,
+    PowerPlantUpdateRequest,
+    PowerPlantUpdateResponse,
     ForecastResponse,
     ModelsListResponse,
     ModelUpdateRequest,
@@ -424,55 +426,6 @@ async def get_power_plants():
             raise HTTPException(status_code=500, detail="Failed to fetch power plants")
 
 
-@app.post("/power_plant", response_model=PowerPlantCreateResponse)
-async def create_power_plant(plant_data: PowerPlantCreateRequest):
-    """
-    Create a new power plant.
-
-    Creates a new power plant with the provided name, longitude, latitude, and capacity.
-    All fields except name are optional.
-    """
-    async with db_pool.acquire() as conn:
-        try:
-            # Use INSERT ... ON CONFLICT to handle race conditions atomically
-            insert_query = """
-                INSERT INTO power_plant_v2 (name, longitude, latitude, capacity)
-                VALUES ($1, $2, $3, $4)
-                ON CONFLICT (name) DO NOTHING
-                RETURNING id
-            """
-
-            plant_id = await conn.fetchval(
-                insert_query,
-                plant_data.name,
-                plant_data.longitude,
-                plant_data.latitude,
-                plant_data.capacity,
-            )
-
-            # If plant_id is None, it means the plant already exists
-            if plant_id is None:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"Power plant with name '{plant_data.name}' already exists",
-                )
-
-            logger.info(
-                f"Power plant created successfully: {plant_data.name} (ID: {plant_id})"
-            )
-
-            return PowerPlantCreateResponse(
-                message="Power plant created successfully",
-                power_plant_id=plant_id,
-            )
-
-        except HTTPException:
-            raise
-        except Exception as e:
-            logger.error(f"Power plant creation failed: {str(e)}")
-            raise HTTPException(status_code=500, detail="Failed to create power plant")
-
-
 @app.get("/power_plant/overview", response_model=List[PowerPlantOverviewResponse])
 async def get_power_plants_overview():
     """
@@ -579,6 +532,188 @@ async def get_power_plants_overview():
             raise HTTPException(
                 status_code=500, detail="Failed to fetch power plant overviews"
             )
+
+
+@app.get("/power_plant/{plant_id}", response_model=PowerPlantDetailResponse)
+async def get_power_plant(plant_id: int):
+    """
+    Get a single power plant by ID with model count.
+    """
+    async with db_pool.acquire() as conn:
+        try:
+            query = """
+                SELECT 
+                    pp.id,
+                    pp.name,
+                    pp.latitude,
+                    pp.longitude,
+                    pp.capacity,
+                    COUNT(mm.id) as model_count
+                FROM power_plant_v2 pp
+                LEFT JOIN model_metadata mm ON pp.id = mm.plant_id
+                WHERE pp.id = $1
+                GROUP BY pp.id, pp.name, pp.latitude, pp.longitude, pp.capacity
+            """
+
+            row = await conn.fetchrow(query, plant_id)
+
+            if not row:
+                raise HTTPException(
+                    status_code=404, detail=f"Power plant with ID {plant_id} not found"
+                )
+
+            return PowerPlantDetailResponse(
+                id=row["id"],
+                name=row["name"],
+                latitude=row["latitude"],
+                longitude=row["longitude"],
+                capacity=row["capacity"],
+                model_count=row["model_count"],
+            )
+
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Database query failed: {str(e)}")
+            raise HTTPException(status_code=500, detail="Failed to fetch power plant")
+
+
+@app.post("/power_plant", response_model=PowerPlantCreateResponse)
+async def create_power_plant(plant_data: PowerPlantCreateRequest):
+    """
+    Create a new power plant.
+
+    Creates a new power plant with the provided name, longitude, latitude, and capacity.
+    All fields except name are optional.
+    """
+    async with db_pool.acquire() as conn:
+        try:
+            # Use INSERT ... ON CONFLICT to handle race conditions atomically
+            insert_query = """
+                INSERT INTO power_plant_v2 (name, longitude, latitude, capacity)
+                VALUES ($1, $2, $3, $4)
+                ON CONFLICT (name) DO NOTHING
+                RETURNING id
+            """
+
+            plant_id = await conn.fetchval(
+                insert_query,
+                plant_data.name,
+                plant_data.longitude,
+                plant_data.latitude,
+                plant_data.capacity,
+            )
+
+            # If plant_id is None, it means the plant already exists
+            if plant_id is None:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Power plant with name '{plant_data.name}' already exists",
+                )
+
+            logger.info(
+                f"Power plant created successfully: {plant_data.name} (ID: {plant_id})"
+            )
+
+            return PowerPlantCreateResponse(
+                message="Power plant created successfully",
+                power_plant_id=plant_id,
+            )
+
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Power plant creation failed: {str(e)}")
+            raise HTTPException(status_code=500, detail="Failed to create power plant")
+
+
+@app.put("/power_plant/{plant_id}", response_model=PowerPlantUpdateResponse)
+async def update_power_plant(plant_id: int, update_data: PowerPlantUpdateRequest):
+    """
+    Update an existing power plant.
+
+    Updates the power plant with the provided data. All fields are optional.
+    Only provided fields will be updated. At least one field must be provided.
+    """
+    # Check if at least one field is provided
+    update_fields = {k: v for k, v in update_data.model_dump().items() if v is not None}
+
+    if not update_fields:
+        raise HTTPException(
+            status_code=400, detail="At least one field must be provided for update"
+        )
+
+    async with db_pool.acquire() as conn:
+        try:
+            # First, check if the power plant exists
+            check_query = """
+                SELECT id, name 
+                FROM power_plant_v2 
+                WHERE id = $1
+            """
+
+            existing_plant = await conn.fetchrow(check_query, plant_id)
+
+            if not existing_plant:
+                raise HTTPException(
+                    status_code=404, detail=f"Power plant with ID {plant_id} not found"
+                )
+
+            # If name is being updated, check for conflicts
+            if (
+                "name" in update_fields
+                and update_fields["name"] != existing_plant["name"]
+            ):
+                name_check_query = """
+                    SELECT id 
+                    FROM power_plant_v2 
+                    WHERE name = $1 AND id != $2
+                """
+
+                existing_name = await conn.fetchrow(
+                    name_check_query, update_fields["name"], plant_id
+                )
+
+                if existing_name:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Power plant with name '{update_fields['name']}' already exists",
+                    )
+
+            # Build dynamic update query
+            set_clauses = []
+            values = []
+            param_idx = 1
+
+            for field, value in update_fields.items():
+                set_clauses.append(f"{field} = ${param_idx}")
+                values.append(value)
+                param_idx += 1
+
+            values.append(plant_id)  # For WHERE clause
+
+            update_query = f"""
+                UPDATE power_plant_v2 
+                SET {", ".join(set_clauses)}
+                WHERE id = ${param_idx}
+            """
+
+            await conn.execute(update_query, *values)
+
+            logger.info(
+                f"Power plant updated successfully: ID {plant_id} with fields {list(update_fields.keys())}"
+            )
+
+            return PowerPlantUpdateResponse(
+                message="Power plant updated successfully",
+                power_plant_id=plant_id,
+            )
+
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Power plant update failed: {str(e)}")
+            raise HTTPException(status_code=500, detail="Failed to update power plant")
 
 
 # ============================================================================
