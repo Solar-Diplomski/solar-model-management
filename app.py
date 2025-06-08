@@ -382,10 +382,10 @@ async def delete_model(model_id: int):
 # ============================================================================
 
 
-@app.get("/power_plant/{id}", response_model=PowerPlantDetailResponse)
-async def get_power_plant(id: int):
+@app.get("/power_plant", response_model=List[PowerPlantDetailResponse])
+async def get_power_plants():
     """
-    Get a single power plant by ID with model count.
+    Get all power plants with model count.
     """
     async with db_pool.acquire() as conn:
         try:
@@ -399,40 +399,37 @@ async def get_power_plant(id: int):
                     COUNT(mm.id) as model_count
                 FROM power_plant_v2 pp
                 LEFT JOIN model_metadata mm ON pp.id = mm.plant_id
-                WHERE pp.id = $1
                 GROUP BY pp.id, pp.name, pp.latitude, pp.longitude, pp.capacity
+                ORDER BY pp.name
             """
 
-            row = await conn.fetchrow(query, id)
+            rows = await conn.fetch(query)
 
-            if not row:
-                raise HTTPException(
-                    status_code=404, detail=f"Power plant with ID {id} not found"
+            return [
+                PowerPlantDetailResponse(
+                    id=row["id"],
+                    name=row["name"],
+                    latitude=row["latitude"],
+                    longitude=row["longitude"],
+                    capacity=row["capacity"],
+                    model_count=row["model_count"],
                 )
+                for row in rows
+            ]
 
-            return PowerPlantDetailResponse(
-                id=row["id"],
-                name=row["name"],
-                latitude=row["latitude"],
-                longitude=row["longitude"],
-                capacity=row["capacity"],
-                model_count=row["model_count"],
-            )
-
-        except HTTPException:
-            raise
         except Exception as e:
             logger.error(f"Database query failed: {str(e)}")
-            raise HTTPException(status_code=500, detail="Failed to fetch power plant")
+            raise HTTPException(status_code=500, detail="Failed to fetch power plants")
 
 
-@app.get("/power_plant/{id}/overview", response_model=PowerPlantOverviewResponse)
-async def get_power_plant_overview(id: int):
+@app.get("/power_plant/overview", response_model=List[PowerPlantOverviewResponse])
+async def get_power_plants_overview():
     """
-    Get power plant overview with forecasts from the first active model.
+    Get overview for all power plants with forecasts from their first active model.
     """
     async with db_pool.acquire() as conn:
         try:
+            # Get all power plants
             plant_query = """
                 SELECT 
                     pp.id,
@@ -440,85 +437,96 @@ async def get_power_plant_overview(id: int):
                     pp.latitude,
                     pp.longitude
                 FROM power_plant_v2 pp
-                WHERE pp.id = $1
+                ORDER BY pp.name
             """
 
-            plant_row = await conn.fetchrow(plant_query, id)
+            plant_rows = await conn.fetch(plant_query)
 
-            if not plant_row:
-                raise HTTPException(
-                    status_code=404, detail=f"Power plant with ID {id} not found"
-                )
-
+            # Get first active model for each plant
             model_query = """
-                SELECT 
+                SELECT DISTINCT ON (mm.plant_id)
+                    mm.plant_id,
                     mm.id,
                     mm.name
                 FROM model_metadata mm
-                WHERE mm.plant_id = $1 AND mm.is_active = true
-                ORDER BY mm.id
-                LIMIT 1
+                WHERE mm.is_active = true
+                ORDER BY mm.plant_id, mm.id
             """
 
-            model_row = await conn.fetchrow(model_query, id)
+            model_rows = await conn.fetch(model_query)
 
-            forecasts = []
+            # Create a map of plant_id to model info
+            plant_models = {
+                row["plant_id"]: {"id": row["id"], "name": row["name"]}
+                for row in model_rows
+            }
 
-            if model_row:
-                try:
-                    # Calculate time period: 00:00:00 of current day to 00:00:00 of next day
-                    now = datetime.now()
-                    start_date = now.replace(hour=0, minute=0, second=0, microsecond=0)
-                    end_date = start_date + timedelta(days=1)
+            # Calculate time period: 00:00:00 of current day to 00:00:00 of next day
+            now = datetime.now()
+            start_date = now.replace(hour=0, minute=0, second=0, microsecond=0)
+            end_date = start_date + timedelta(days=1)
+            start_date_str = start_date.strftime("%Y-%m-%dT%H:%M:%SZ")
+            end_date_str = end_date.strftime("%Y-%m-%dT%H:%M:%SZ")
 
-                    start_date_str = start_date.strftime("%Y-%m-%dT%H:%M:%SZ")
-                    end_date_str = end_date.strftime("%Y-%m-%dT%H:%M:%SZ")
+            overviews = []
 
-                    async with httpx.AsyncClient() as client:
-                        forecast_url = f"{PREDICTION_SERVICE_URL}/internal/forecast/{model_row['id']}"
-                        params = {
-                            "start_date": start_date_str,
-                            "end_date": end_date_str,
-                        }
+            for plant_row in plant_rows:
+                forecasts = []
+                plant_id = plant_row["id"]
 
-                        response = await client.get(forecast_url, params=params)
+                if plant_id in plant_models:
+                    model_info = plant_models[plant_id]
+                    try:
+                        async with httpx.AsyncClient() as client:
+                            forecast_url = f"{PREDICTION_SERVICE_URL}/internal/forecast/{model_info['id']}"
+                            params = {
+                                "start_date": start_date_str,
+                                "end_date": end_date_str,
+                            }
 
-                        if response.status_code == 200:
-                            forecast_data = response.json()
+                            response = await client.get(forecast_url, params=params)
 
-                            # Transform the forecast data to include model name
-                            forecasts = [
-                                ForecastResponse(
-                                    id=model_row["id"],
-                                    name=model_row["name"],
-                                    prediction_time=item["prediction_time"],
-                                    power_output=item["power_output"],
-                                )
-                                for item in forecast_data
-                            ]
+                            if response.status_code == 200:
+                                forecast_data = response.json()
 
-                except Exception as e:
-                    logger.warning(
-                        f"Failed to fetch forecasts from prediction service: {str(e)}"
+                                # Transform the forecast data to include model name
+                                forecasts = [
+                                    ForecastResponse(
+                                        id=model_info["id"],
+                                        name=model_info["name"],
+                                        prediction_time=item["prediction_time"],
+                                        power_output=item["power_output"],
+                                    )
+                                    for item in forecast_data
+                                ]
+
+                    except Exception as e:
+                        logger.warning(
+                            f"Failed to fetch forecasts for plant {plant_id} from prediction service: {str(e)}"
+                        )
+
+                coordinates = []
+                if (
+                    plant_row["latitude"] is not None
+                    and plant_row["longitude"] is not None
+                ):
+                    coordinates = [plant_row["latitude"], plant_row["longitude"]]
+
+                overviews.append(
+                    PowerPlantOverviewResponse(
+                        id=plant_row["id"],
+                        name=plant_row["name"],
+                        forecasts=forecasts,
+                        coordinates=coordinates,
                     )
+                )
 
-            coordinates = []
-            if plant_row["latitude"] is not None and plant_row["longitude"] is not None:
-                coordinates = [plant_row["latitude"], plant_row["longitude"]]
+            return overviews
 
-            return PowerPlantOverviewResponse(
-                id=plant_row["id"],
-                name=plant_row["name"],
-                forecasts=forecasts,
-                coordinates=coordinates,
-            )
-
-        except HTTPException:
-            raise
         except Exception as e:
             logger.error(f"Database query failed: {str(e)}")
             raise HTTPException(
-                status_code=500, detail="Failed to fetch power plant overview"
+                status_code=500, detail="Failed to fetch power plant overviews"
             )
 
 
