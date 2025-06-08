@@ -588,7 +588,6 @@ async def create_power_plant(plant_data: PowerPlantCreateRequest):
     """
     async with db_pool.acquire() as conn:
         try:
-            # Use INSERT ... ON CONFLICT to handle race conditions atomically
             insert_query = """
                 INSERT INTO power_plant_v2 (name, longitude, latitude, capacity)
                 VALUES ($1, $2, $3, $4)
@@ -604,7 +603,6 @@ async def create_power_plant(plant_data: PowerPlantCreateRequest):
                 plant_data.capacity,
             )
 
-            # If plant_id is None, it means the plant already exists
             if plant_id is None:
                 raise HTTPException(
                     status_code=400,
@@ -635,7 +633,6 @@ async def update_power_plant(plant_id: int, update_data: PowerPlantUpdateRequest
     Updates the power plant with the provided data. All fields are optional.
     Only provided fields will be updated. At least one field must be provided.
     """
-    # Check if at least one field is provided
     update_fields = {k: v for k, v in update_data.model_dump().items() if v is not None}
 
     if not update_fields:
@@ -645,7 +642,6 @@ async def update_power_plant(plant_id: int, update_data: PowerPlantUpdateRequest
 
     async with db_pool.acquire() as conn:
         try:
-            # First, check if the power plant exists
             check_query = """
                 SELECT id, name 
                 FROM power_plant_v2 
@@ -680,7 +676,6 @@ async def update_power_plant(plant_id: int, update_data: PowerPlantUpdateRequest
                         detail=f"Power plant with name '{update_fields['name']}' already exists",
                     )
 
-            # Build dynamic update query
             set_clauses = []
             values = []
             param_idx = 1
@@ -690,7 +685,7 @@ async def update_power_plant(plant_id: int, update_data: PowerPlantUpdateRequest
                 values.append(value)
                 param_idx += 1
 
-            values.append(plant_id)  # For WHERE clause
+            values.append(plant_id)
 
             update_query = f"""
                 UPDATE power_plant_v2 
