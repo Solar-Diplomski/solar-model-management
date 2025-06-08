@@ -434,19 +434,11 @@ async def create_power_plant(plant_data: PowerPlantCreateRequest):
     """
     async with db_pool.acquire() as conn:
         try:
-            existing_plant = await conn.fetchrow(
-                "SELECT id FROM power_plant_v2 WHERE name = $1", plant_data.name
-            )
-
-            if existing_plant:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"Power plant with name '{plant_data.name}' already exists",
-                )
-
+            # Use INSERT ... ON CONFLICT to handle race conditions atomically
             insert_query = """
                 INSERT INTO power_plant_v2 (name, longitude, latitude, capacity)
                 VALUES ($1, $2, $3, $4)
+                ON CONFLICT (name) DO NOTHING
                 RETURNING id
             """
 
@@ -457,6 +449,13 @@ async def create_power_plant(plant_data: PowerPlantCreateRequest):
                 plant_data.latitude,
                 plant_data.capacity,
             )
+
+            # If plant_id is None, it means the plant already exists
+            if plant_id is None:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Power plant with name '{plant_data.name}' already exists",
+                )
 
             logger.info(
                 f"Power plant created successfully: {plant_data.name} (ID: {plant_id})"
