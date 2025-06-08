@@ -22,6 +22,8 @@ from solar_model_mgmt.models import (
     PowerPlantDetailResponse,
     PowerPlantResponse,
     PowerPlantOverviewResponse,
+    PowerPlantCreateRequest,
+    PowerPlantCreateResponse,
     ForecastResponse,
     ModelsListResponse,
     ModelUpdateRequest,
@@ -420,6 +422,56 @@ async def get_power_plants():
         except Exception as e:
             logger.error(f"Database query failed: {str(e)}")
             raise HTTPException(status_code=500, detail="Failed to fetch power plants")
+
+
+@app.post("/power_plant", response_model=PowerPlantCreateResponse)
+async def create_power_plant(plant_data: PowerPlantCreateRequest):
+    """
+    Create a new power plant.
+
+    Creates a new power plant with the provided name, longitude, latitude, and capacity.
+    All fields except name are optional.
+    """
+    async with db_pool.acquire() as conn:
+        try:
+            existing_plant = await conn.fetchrow(
+                "SELECT id FROM power_plant_v2 WHERE name = $1", plant_data.name
+            )
+
+            if existing_plant:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Power plant with name '{plant_data.name}' already exists",
+                )
+
+            insert_query = """
+                INSERT INTO power_plant_v2 (name, longitude, latitude, capacity)
+                VALUES ($1, $2, $3, $4)
+                RETURNING id
+            """
+
+            plant_id = await conn.fetchval(
+                insert_query,
+                plant_data.name,
+                plant_data.longitude,
+                plant_data.latitude,
+                plant_data.capacity,
+            )
+
+            logger.info(
+                f"Power plant created successfully: {plant_data.name} (ID: {plant_id})"
+            )
+
+            return PowerPlantCreateResponse(
+                message="Power plant created successfully",
+                power_plant_id=plant_id,
+            )
+
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Power plant creation failed: {str(e)}")
+            raise HTTPException(status_code=500, detail="Failed to create power plant")
 
 
 @app.get("/power_plant/overview", response_model=List[PowerPlantOverviewResponse])

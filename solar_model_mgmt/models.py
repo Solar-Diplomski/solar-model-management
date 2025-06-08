@@ -100,3 +100,15 @@ class PowerPlantOverviewResponse(BaseModel):
     name: str
     forecasts: List[ForecastResponse]
     coordinates: List[float]  # [latitude, longitude]
+
+
+class PowerPlantCreateRequest(BaseModel):
+    name: str
+    longitude: float | None = None
+    latitude: float | None = None
+    capacity: float | None = None
+
+
+class PowerPlantCreateResponse(BaseModel):
+    message: str
+    power_plant_id: int
