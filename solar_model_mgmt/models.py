@@ -86,3 +86,17 @@ class DeleteSuccessResponse(BaseModel):
 
 class AvailableFeaturesResponse(BaseModel):
     features: List[str]
+
+
+class ForecastResponse(BaseModel):
+    id: int  # model id
+    name: str  # model name
+    prediction_time: str
+    power_output: float
+
+
+class PowerPlantOverviewResponse(BaseModel):
+    id: int  # power plant id
+    name: str
+    forecasts: List[ForecastResponse]
+    coordinates: List[float]  # [latitude, longitude]

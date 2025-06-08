@@ -5,6 +5,9 @@ DATABASE_URL = os.getenv(
     "DATABASE_URL", "postgresql://postgres:postgres@localhost:5432/solar"
 )
 
+# Prediction service configuration
+PREDICTION_SERVICE_URL = os.getenv("PREDICTION_SERVICE_URL", "http://localhost:8001")
+
 # Storage configuration
 MODEL_STORAGE_PATH = os.getenv("MODEL_STORAGE_PATH", "./models")
 
