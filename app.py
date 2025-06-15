@@ -920,9 +920,3 @@ async def download_model(model_id: int):
         except Exception as e:
             logger.error(f"Model download failed: {str(e)}")
             raise HTTPException(status_code=500, detail="Failed to download model")
-
-
-if __name__ == "__main__":
-    import uvicorn
-
-    uvicorn.run(app, host="0.0.0.0", port=os.environ.get("PORT", "8000"))
