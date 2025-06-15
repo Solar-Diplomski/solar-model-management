@@ -580,6 +580,71 @@ async def get_power_plant(plant_id: int):
             raise HTTPException(status_code=500, detail="Failed to fetch power plant")
 
 
+@app.get("/power_plant/{plant_id}/models", response_model=List[ModelResponse])
+async def get_power_plant_models(plant_id: int):
+    """
+    Get all models for a specific power plant.
+    Returns all models associated with the given power plant ID,
+    sorted by model name and then by version.
+    """
+    async with db_pool.acquire() as conn:
+        try:
+            plant_check_query = """
+                SELECT id, name 
+                FROM power_plant_v2 
+                WHERE id = $1
+            """
+
+            plant = await conn.fetchrow(plant_check_query, plant_id)
+
+            if not plant:
+                raise HTTPException(
+                    status_code=404, detail=f"Power plant with ID {plant_id} not found"
+                )
+
+            models_query = """
+                SELECT 
+                    mm.id,
+                    mm.name,
+                    mm.type,
+                    mm.version,
+                    mm.features,
+                    mm.is_active,
+                    mm.file_type,
+                    pp.name as plant_name
+                FROM model_metadata mm
+                JOIN power_plant_v2 pp ON mm.plant_id = pp.id
+                WHERE mm.plant_id = $1
+                ORDER BY mm.name, mm.version
+            """
+
+            rows = await conn.fetch(models_query, plant_id)
+
+            models = [
+                ModelResponse(
+                    id=row["id"],
+                    name=row["name"],
+                    type=row["type"],
+                    version=row["version"],
+                    features=row["features"],
+                    plant_name=row["plant_name"],
+                    is_active=row["is_active"],
+                    file_type=row["file_type"],
+                )
+                for row in rows
+            ]
+
+            return models
+
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Database query failed: {str(e)}")
+            raise HTTPException(
+                status_code=500, detail="Failed to fetch models for power plant"
+            )
+
+
 @app.post("/power_plant", response_model=PowerPlantCreateResponse)
 async def create_power_plant(plant_data: PowerPlantCreateRequest):
     """
