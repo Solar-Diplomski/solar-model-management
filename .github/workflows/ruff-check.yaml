@@ -16,8 +16,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       
-      - name: Install linter
-        run: pip install ruff
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install Ruff
+        run: pip install --user ruff
+
+      - name: Add local bin to PATH
+        run: echo "$HOME/.local/bin" >> $GITHUB_PATH
 
       - name: Run ruff
         run: ruff check .
