@@ -14,6 +14,7 @@ class ModelResponse(BaseModel):
     type: str
     version: int
     features: Any
+    plant_id: int
     plant_name: str
     is_active: bool
     file_type: str

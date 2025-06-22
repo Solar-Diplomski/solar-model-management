@@ -123,6 +123,7 @@ async def list_models(
                     mm.features,
                     mm.is_active,
                     mm.file_type,
+                    pp.id as plant_id,
                     pp.name as plant_name
                 FROM model_metadata mm
                 JOIN power_plant_v2 pp ON mm.plant_id = pp.id
@@ -139,6 +140,7 @@ async def list_models(
                     type=row["type"],
                     version=row["version"],
                     features=row["features"],
+                    plant_id=row["plant_id"],
                     plant_name=row["plant_name"],
                     is_active=row["is_active"],
                     file_type=row["file_type"],
@@ -177,6 +179,7 @@ async def get_model(model_id: int):
                     mm.features,
                     mm.is_active,
                     mm.file_type,
+                    pp.id as plant_id,
                     pp.name as plant_name
                 FROM model_metadata mm
                 JOIN power_plant_v2 pp ON mm.plant_id = pp.id
@@ -196,6 +199,7 @@ async def get_model(model_id: int):
                 type=row["type"],
                 version=row["version"],
                 features=row["features"],
+                plant_id=row["plant_id"],
                 plant_name=row["plant_name"],
                 is_active=row["is_active"],
                 file_type=row["file_type"],
@@ -611,6 +615,7 @@ async def get_power_plant_models(plant_id: int):
                     mm.features,
                     mm.is_active,
                     mm.file_type,
+                    pp.id as plant_id,
                     pp.name as plant_name
                 FROM model_metadata mm
                 JOIN power_plant_v2 pp ON mm.plant_id = pp.id
@@ -627,6 +632,7 @@ async def get_power_plant_models(plant_id: int):
                     type=row["type"],
                     version=row["version"],
                     features=row["features"],
+                    plant_id=row["plant_id"],
                     plant_name=row["plant_name"],
                     is_active=row["is_active"],
                     file_type=row["file_type"],
