@@ -1,0 +1,26 @@
+# .github/workflows/ruff-check.yml
+name: Ruff Check
+
+on:
+  pull_request:
+    branches: [prod]        # Target branch of the PR
+    paths:
+      - '**.py'           # Optional: Only run if Python files change
+
+jobs:
+  lint-python:
+    name: Run ruff check .
+    if: github.event.pull_request.head.ref == 'main' # Source branch is 'main'
+    runs-on: [self-hosted, Openshift]  # Use your org-wide self-hosted runner
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Ruff
+        run: pip install --user ruff
+
+      - name: Add local bin to PATH
+        run: echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+      - name: Run ruff
+        run: ruff check .
