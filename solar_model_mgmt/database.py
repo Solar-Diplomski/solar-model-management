@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 
 async def check_plant_exists(conn: asyncpg.Connection, plant_id: int) -> None:
     """Check if the specified plant ID exists in the database."""
-    plant = await conn.fetchrow("SELECT id FROM power_plant_v2 WHERE id = $1", plant_id)
+    plant = await conn.fetchrow("SELECT id FROM power_plant WHERE id = $1", plant_id)
     if not plant:
         raise HTTPException(status_code=404, detail="Plant ID does not exist.")
 
