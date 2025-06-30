@@ -110,7 +110,7 @@ async def list_models(
             count_query = """
                 SELECT COUNT(*) 
                 FROM model_metadata mm
-                JOIN power_plant_v2 pp ON mm.plant_id = pp.id
+                JOIN power_plant pp ON mm.plant_id = pp.id
             """
             total_count = await conn.fetchval(count_query)
 
@@ -126,7 +126,7 @@ async def list_models(
                     pp.id as plant_id,
                     pp.name as plant_name
                 FROM model_metadata mm
-                JOIN power_plant_v2 pp ON mm.plant_id = pp.id
+                JOIN power_plant pp ON mm.plant_id = pp.id
                 ORDER BY pp.name, mm.name, mm.version
                 LIMIT $1 OFFSET $2
             """
@@ -182,7 +182,7 @@ async def get_model(model_id: int):
                     pp.id as plant_id,
                     pp.name as plant_name
                 FROM model_metadata mm
-                JOIN power_plant_v2 pp ON mm.plant_id = pp.id
+                JOIN power_plant pp ON mm.plant_id = pp.id
                 WHERE mm.id = $1
             """
 
@@ -311,7 +311,7 @@ async def update_model_features(model_id: int, update_data: ModelUpdateRequest):
                     mm.file_type,
                     pp.name as plant_name
                 FROM model_metadata mm
-                JOIN power_plant_v2 pp ON mm.plant_id = pp.id
+                JOIN power_plant pp ON mm.plant_id = pp.id
                 WHERE mm.id = $1
             """
 
@@ -405,7 +405,7 @@ async def get_power_plants():
                     pp.longitude,
                     pp.capacity,
                     COUNT(mm.id) as model_count
-                FROM power_plant_v2 pp
+                FROM power_plant pp
                 LEFT JOIN model_metadata mm ON pp.id = mm.plant_id
                 GROUP BY pp.id, pp.name, pp.latitude, pp.longitude, pp.capacity
                 ORDER BY pp.name
@@ -444,7 +444,7 @@ async def get_power_plants_overview():
                     pp.name,
                     pp.latitude,
                     pp.longitude
-                FROM power_plant_v2 pp
+                FROM power_plant pp
                 ORDER BY pp.name
             """
 
@@ -555,7 +555,7 @@ async def get_power_plant(plant_id: int):
                     pp.longitude,
                     pp.capacity,
                     COUNT(mm.id) as model_count
-                FROM power_plant_v2 pp
+                FROM power_plant pp
                 LEFT JOIN model_metadata mm ON pp.id = mm.plant_id
                 WHERE pp.id = $1
                 GROUP BY pp.id, pp.name, pp.latitude, pp.longitude, pp.capacity
@@ -595,7 +595,7 @@ async def get_power_plant_models(plant_id: int):
         try:
             plant_check_query = """
                 SELECT id, name 
-                FROM power_plant_v2 
+                FROM power_plant 
                 WHERE id = $1
             """
 
@@ -618,7 +618,7 @@ async def get_power_plant_models(plant_id: int):
                     pp.id as plant_id,
                     pp.name as plant_name
                 FROM model_metadata mm
-                JOIN power_plant_v2 pp ON mm.plant_id = pp.id
+                JOIN power_plant pp ON mm.plant_id = pp.id
                 WHERE mm.plant_id = $1
                 ORDER BY mm.name, mm.version
             """
@@ -662,7 +662,7 @@ async def create_power_plant(plant_data: PowerPlantCreateRequest):
     async with db_pool.acquire() as conn:
         try:
             insert_query = """
-                INSERT INTO power_plant_v2 (name, longitude, latitude, capacity)
+                INSERT INTO power_plant (name, longitude, latitude, capacity)
                 VALUES ($1, $2, $3, $4)
                 ON CONFLICT (name) DO NOTHING
                 RETURNING id
@@ -717,7 +717,7 @@ async def update_power_plant(plant_id: int, update_data: PowerPlantUpdateRequest
         try:
             check_query = """
                 SELECT id, name 
-                FROM power_plant_v2 
+                FROM power_plant 
                 WHERE id = $1
             """
 
@@ -735,7 +735,7 @@ async def update_power_plant(plant_id: int, update_data: PowerPlantUpdateRequest
             ):
                 name_check_query = """
                     SELECT id 
-                    FROM power_plant_v2 
+                    FROM power_plant 
                     WHERE name = $1 AND id != $2
                 """
 
@@ -761,7 +761,7 @@ async def update_power_plant(plant_id: int, update_data: PowerPlantUpdateRequest
             values.append(plant_id)
 
             update_query = f"""
-                UPDATE power_plant_v2 
+                UPDATE power_plant 
                 SET {", ".join(set_clauses)}
                 WHERE id = ${param_idx}
             """
@@ -805,7 +805,7 @@ async def get_power_plants_with_active_models():
                     pp.longitude,
                     pp.latitude,
                     pp.capacity
-                FROM power_plant_v2 pp
+                FROM power_plant pp
                 INNER JOIN model_metadata mm ON pp.id = mm.plant_id
                 WHERE mm.is_active = true
                 ORDER BY pp.id
@@ -848,7 +848,7 @@ async def get_active_models():
                     mm.file_type,
                     mm.plant_id
                 FROM model_metadata mm
-                JOIN power_plant_v2 pp ON mm.plant_id = pp.id
+                JOIN power_plant pp ON mm.plant_id = pp.id
                 WHERE mm.is_active = true
                 ORDER BY pp.name, mm.name, mm.version
             """
@@ -890,7 +890,7 @@ async def download_model(model_id: int):
                     mm.plant_id,
                     pp.name as plant_name
                 FROM model_metadata mm
-                JOIN power_plant_v2 pp ON mm.plant_id = pp.id
+                JOIN power_plant pp ON mm.plant_id = pp.id
                 WHERE mm.id = $1
             """
 
