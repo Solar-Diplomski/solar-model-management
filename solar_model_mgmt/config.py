@@ -12,7 +12,7 @@ PREDICTION_SERVICE_URL = os.getenv("PREDICTION_SERVICE_URL", "http://localhost:8
 MODEL_STORAGE_PATH = os.getenv("MODEL_STORAGE_PATH", "./models")
 
 # File validation
-ALLOWED_EXTENSIONS = {".joblib", ".pkl", ".sav", ".h5", ".pt", ".onnx"}
+ALLOWED_EXTENSIONS = {".joblib", ".pkl", ".sav", ".h5", ".pt", ".onnx", ".zip"}
 
 # Available features for model training and prediction
 AVAILABLE_FEATURES = [
@@ -27,6 +27,7 @@ AVAILABLE_FEATURES = [
     "shortwave_radiation_instant",
     "diffuse_radiation",
     "diffuse_radiation_instant",
+    "direct_radiation_instant",
     "direct_normal_irradiance",
     "et0_fao_evapotranspiration",
     "vapour_pressure_deficit",
@@ -47,4 +48,5 @@ AVAILABLE_FEATURES = [
     "latitude",
     "longitude",
     "elevation",
+    "datetime",
 ]
