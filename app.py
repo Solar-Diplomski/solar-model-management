@@ -81,7 +81,7 @@ async def root():
     return {"message": "Solar Model Management API"}
 
 @app.get("/dummy")
-async def root():
+async def dummy():
     return {"message": "Solar Model Management API"}
 
 
