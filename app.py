@@ -82,7 +82,7 @@ async def root():
 
 @app.get("/dummy")
 async def dummy():
-    return {"message": "Solar Model Management API"}
+    return {"message": "New dummy route"}
 
 
 @app.get("/features", response_model=AvailableFeaturesResponse)
