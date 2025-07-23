@@ -80,6 +80,10 @@ app = FastAPI(title="Solar Model Management API", version="1.0.0", lifespan=life
 async def root():
     return {"message": "Solar Model Management API"}
 
+@app.get("/dummy")
+async def root():
+    return {"message": "Solar Model Management API"}
+
 
 @app.get("/features", response_model=AvailableFeaturesResponse)
 async def get_available_features():
